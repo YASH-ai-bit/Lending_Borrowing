@@ -18,7 +18,10 @@ contract LBTest is Test {
     ERC20Mock usdc;
 
     address public USER = makeAddr("User");
-    uint256 public constant INITIAL_BALANCE = 1000 ;
+    uint256 public constant INITIAL_BALANCE = 1000;
+    uint256 public constant AMT_WETH = 100;
+    uint256 public constant AMT_USDC = 100;
+    uint256 public constant TEST_AMT = 10;
 
     function setUp() public {
         deployer = new DeployLB();
@@ -41,4 +44,28 @@ contract LBTest is Test {
         usdc.approve(address(lb), type(uint256).max);
         vm.stopPrank();
     }
+
+    ///////////////////DEPOSIT////////////////////////
+    function testMappingUpdatesAfterDepositingSomeAmount() public {
+        vm.prank(USER);
+        lb.deposit(AMT_WETH);                             
+        console.log(lb.getUser(USER).deposit);
+        assert(lb.getUser(USER).deposit == 100);
+    }
+
+    /////////////////BORROW//////////////////////////
+    function testRevertIfBorrowAmountLargerThanCollateral() public {
+        vm.prank(USER);              // 100000000000000000000 eth --> 100 weth --> 1 eth = 2000 usdc --> maxborrow = 1,00,000 usdc --> 1,00,000e6
+        lb.deposit(AMT_WETH);
+
+        console.log(lb.getUser(USER).collateral);
+        console.log(lb.getmaxborrow());
+        console.log(lb.weth_price());
+        console.log(usdc.balanceOf(USER));
+        console.log(lb.getUser(USER).debt);
+        vm.expectRevert(LendingBorrowing.LendingBorrowing__NotEnoughCollateral.selector);
+        lb.borrow(TEST_AMT);
+    }
+
+
 }
