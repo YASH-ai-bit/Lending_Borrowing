@@ -91,7 +91,7 @@ contract LendingBorrowing is ReentrancyGuard{
         uint256 collateralAmount = __user.collateral;
         uint256 MaximumCanBorrow = collateralAmount * weth_price * COLLATERAL_FACTOR;
 
-        if(usdc_amount > MaximumCanBorrow){
+        if(usdc_amount > MaximumCanBorrow / USDC_PRICE){
             revert LendingBorrowing__NotEnoughCollateral();
         }
 
@@ -129,7 +129,7 @@ contract LendingBorrowing is ReentrancyGuard{
         }
         uint256 collateralInWEth = users[user].collateral;
         uint256 collateralInUsdc = getWEthPriceInUsd(collateralInWEth);
-        uint256 debtAlreadyInUsdc = users[user].debt;
+        uint256 debtAlreadyInUsdc = users[user].debt * USDC_PRICE;
         uint256 liquidationBonus = (collateralInUsdc * LIQUIDATION_BONUS) / LIQUIDATION_PRECISION ;
         uint256 totalDebtToBeCovered = debtAlreadyInUsdc + liquidationBonus;
 
@@ -202,7 +202,7 @@ contract LendingBorrowing is ReentrancyGuard{
 
     function _healthFactor(address user, uint256 collateralValueInWEth) internal returns(uint256){
         uint256 collateralInUsdc = getWEthPriceInUsd(collateralValueInWEth);
-        uint256 debt_amount = users[user].debt;
+        uint256 debt_amount = users[user].debt * USDC_PRICE;
         if(debt_amount == 0){
             revert LendingBorrowing__DivisionByZero();
         }
