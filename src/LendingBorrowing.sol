@@ -17,6 +17,9 @@ contract LendingBorrowing is ReentrancyGuard{
     error LendingBorrowing__ZeroAmount();
     error LendingBorrowing__YouAreNotABorrower_UseWithdrawFunction();
     error LendingBorrowing__CantWithdrawPartially__WithdrawingTooMuch();
+    error LendingBorrowing__InvalidPriceFeed();
+    error LendingBorrowing__ExceedsTotalBalance();
+    error LendingBorrowing__DivisionByZero();
 
     ////////////////MODIFIERS////////////////
     modifier nonZero(uint256 _amount){
@@ -27,16 +30,19 @@ contract LendingBorrowing is ReentrancyGuard{
     }
 
     ////////////////EVENTS///////////////////
-    event deposited(address indexed user, uint256 indexed amount, uint256 indexed time);
-    event borrowed(address indexed user, uint256 indexed amount, uint256 indexed time);
-    event repayed(address indexed user, uint256 indexed amount, uint256 indexed time);
-    event withdrawn(address indexed user, uint256 indexed amount, uint256 indexed time);
+    event deposited(address indexed user, uint256 indexed amount, uint256 time);
+    event borrowed(address indexed user, uint256 indexed amount, uint256 time);
+    event repayed(address indexed user, uint256 indexed amount, uint256 time);
+    event withdrawn(address indexed user, uint256 indexed amount, uint256 time);
+    event partiallyWithdrawn(address indexed user, uint256 indexed amount, uint256 time);
     event liquidated(address indexed user);
 
     ///////////////STATE VARIABLES///////////
     IERC20 public weth;
     IERC20 public usdc;
-    uint256 public weth_price;
+    AggregatorV3Interface priceFeed;
+    uint256 public weth_price ;
+    User public __user = users[msg.sender];
     uint256 public constant USDC_PRICE = 1 ; // $1 --> assuming constant
 
     struct User {
@@ -60,11 +66,14 @@ contract LendingBorrowing is ReentrancyGuard{
     uint256 public constant PRECISION = 1e18;
     uint256 public constant LIQUIDATION_BONUS = 3 ; //3 %
     uint256 public constant LIQUIDATION_PRECISION = 100;
-    uint256 public constant MIN_HEALTH_FACTOR = 1;
+    uint256 public constant MIN_HEALTH_FACTOR = 1e18 ;
 
-    constructor(address _weth, address _usdc) {
+    constructor(address _weth, address _usdc, address _priceFeed) {
         weth = IERC20(_weth);       //token1 can be deposited
         usdc = IERC20(_usdc);       //token2 can be borrowed
+
+        priceFeed = AggregatorV3Interface(_priceFeed);           //_priceFeed is ETH/USD priceFeed from chainlink
+        weth_price = getWEthPriceInUsd(1);
     }
 
     function deposit(uint256 weth_amount) public nonZero(weth_amount){
@@ -72,14 +81,14 @@ contract LendingBorrowing is ReentrancyGuard{
         if(!success) {
             revert LendingBorrowing__TransferFailed();
         }
-        users[msg.sender].deposit += weth_amount;
-        users[msg.sender].collateral += weth_amount;
-        users[msg.sender].lastDepositionTime = block.timestamp;
+        __user.deposit += weth_amount;
+        __user.collateral += weth_amount;
+        __user.lastDepositionTime = block.timestamp;
         emit deposited(msg.sender, weth_amount, block.timestamp);
     }
 
     function borrow(uint256 usdc_amount) public nonZero(usdc_amount){                          //borrower wants usdc_amount of USDC.
-        uint256 collateralAmount = users[msg.sender].collateral;
+        uint256 collateralAmount = __user.collateral;
         uint256 MaximumCanBorrow = collateralAmount * weth_price * COLLATERAL_FACTOR;
 
         if(usdc_amount > MaximumCanBorrow){
@@ -87,9 +96,9 @@ contract LendingBorrowing is ReentrancyGuard{
         }
 
         usdc.transferFrom(address(this), msg.sender, usdc_amount);
-        users[msg.sender].debt += usdc_amount;                          //updating debt
-        users[msg.sender].lastBorrowTime = block.timestamp;             //updating timestamp to use in repay calculation
-        users[msg.sender].isBorrower = true;
+        __user.debt += usdc_amount;                          //updating debt
+        __user.lastBorrowTime = block.timestamp;             //updating timestamp to use in repay calculation
+        __user.isBorrower = true;
         emit borrowed(msg.sender, usdc_amount, block.timestamp);
     }
 
@@ -100,11 +109,11 @@ contract LendingBorrowing is ReentrancyGuard{
         }
         usdc.transferFrom(msg.sender , address(this), usdc_amount);
 
-        users[msg.sender].debt -= usdc_amount;
-        users[msg.sender].lastBorrowTime = block.timestamp;
+        __user.debt -= usdc_amount;
+        __user.lastBorrowTime = block.timestamp;
 
-        if(users[msg.sender].debt == 0) {
-            users[msg.sender].isBorrower = false;
+        if(__user.debt == 0) {
+            __user.isBorrower = false;
         }
 
         emit repayed(msg.sender, usdc_amount, block.timestamp);
@@ -121,7 +130,7 @@ contract LendingBorrowing is ReentrancyGuard{
         uint256 collateralInWEth = users[user].collateral;
         uint256 collateralInUsdc = getWEthPriceInUsd(collateralInWEth);
         uint256 debtAlreadyInUsdc = users[user].debt;
-        uint256 liquidationBonus = (debtAlreadyInUsdc * LIQUIDATION_BONUS) / LIQUIDATION_PRECISION ;
+        uint256 liquidationBonus = (collateralInUsdc * LIQUIDATION_BONUS) / LIQUIDATION_PRECISION ;
         uint256 totalDebtToBeCovered = debtAlreadyInUsdc + liquidationBonus;
 
         if(totalDebtToBeCovered > collateralInUsdc){
@@ -132,28 +141,44 @@ contract LendingBorrowing is ReentrancyGuard{
         users[user].debt = 0 ;
         users[user].isBorrower = false;
 
-        payable(msg.sender).transfer(liquidationBonus);        //paying the liquidator
+        usdc.transfer(msg.sender, liquidationBonus);        //paying the liquidator
 
         emit liquidated(user);
     }
 
     function withdraw(uint256 weth_amount) public nonZero(weth_amount) nonReentrant{
-        if(users[msg.sender].isBorrower){
+        if(__user.isBorrower){
             revert LendingBorrowing__CantWithdrawYourCollateralIsLocked();
         }
-        uint256 amountWithInterest = calculateWithdrawalWithInterest(msg.sender, weth_amount);
+        uint256 totalAmountWithInterest = calculateWithdrawalWithInterest(msg.sender);
+        if(weth_amount > totalAmountWithInterest){
+            revert LendingBorrowing__ExceedsTotalBalance();
+        }
 
-        weth.transferFrom(address(this), msg.sender, amountWithInterest);
+        weth.transfer(msg.sender, weth_amount);
+
+        __user.deposit = (totalAmountWithInterest - weth_amount);
+        __user.lastDepositionTime = block.timestamp;
+        emit withdrawn(msg.sender, weth_amount, block.timestamp);
     }
 
     function partialWithdraw(uint256 weth_amount) public nonReentrant{
-        if(!users[msg.sender].isBorrower){
+        if(!__user.isBorrower){
             revert LendingBorrowing__YouAreNotABorrower_UseWithdrawFunction();
         }
-        uint256 healthFactorAfterWithdrawal = _healthFactor(msg.sender, (users[msg.sender].collateral - weth_amount));
+        uint256 healthFactorAfterWithdrawal = _healthFactor(msg.sender, (__user.collateral - weth_amount));
         if(healthFactorAfterWithdrawal < 1) {
             revert LendingBorrowing__CantWithdrawPartially__WithdrawingTooMuch();
         }
+        uint256 totalAmountWithInterest = calculateWithdrawalWithInterest(msg.sender);
+        if(weth_amount > totalAmountWithInterest){
+            revert LendingBorrowing__ExceedsTotalBalance();
+        }
+        weth.transfer(msg.sender, weth_amount);
+
+        __user.deposit = (totalAmountWithInterest - weth_amount);
+        __user.lastDepositionTime = block.timestamp;
+        emit partiallyWithdrawn(msg.sender, weth_amount, block.timestamp);
     }
 
     /////////////HELPER FUNCTIONS//////////////////
@@ -167,17 +192,20 @@ contract LendingBorrowing is ReentrancyGuard{
         return (debt_amount + interest);
     }
 
-    function calculateWithdrawalWithInterest(address user, uint256 weth_amount) internal view returns(uint256){
+    function calculateWithdrawalWithInterest(address user) internal view returns(uint256){
+        uint256 depositedBalance = __user.deposit;
         uint256 timeGone = block.timestamp - users[user].lastDepositionTime ;
-        uint256 interest = (weth_amount * LENDING_INTEREST * timeGone) / (100 * NUMBER_OF_SECONDS_IN_A_YEAR);
+        uint256 interest = (depositedBalance * LENDING_INTEREST * timeGone) / (100 * NUMBER_OF_SECONDS_IN_A_YEAR);
 
-        return (weth_amount + interest);
+        return (depositedBalance + interest);
     }
 
     function _healthFactor(address user, uint256 collateralValueInWEth) internal returns(uint256){
-        collateralValueInWEth = users[user].collateral ;
         uint256 collateralInUsdc = getWEthPriceInUsd(collateralValueInWEth);
         uint256 debt_amount = users[user].debt;
+        if(debt_amount == 0){
+            revert LendingBorrowing__DivisionByZero();
+        }
         uint256 __healthFactor = (collateralInUsdc * LIQUIDATION_THRESHOLD) / debt_amount; 
 
         users[user].healthFactor = __healthFactor;     //updating struct
@@ -185,8 +213,10 @@ contract LendingBorrowing is ReentrancyGuard{
     }
 
     function getWEthPriceInUsd(uint256 weth_amount) internal view returns(uint256){
-        AggregatorV3Interface priceFeed = AggregatorV3Interface(address(weth));
         (, int256 price,,,) = priceFeed.latestRoundData();
+        if(price <= 0) {
+            revert LendingBorrowing__InvalidPriceFeed();
+        }
         return ((uint256(price) * ADDITIONAL_FEED_PRECISION) * weth_amount) / PRECISION;
     } 
 }
