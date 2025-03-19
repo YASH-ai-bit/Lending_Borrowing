@@ -75,20 +75,32 @@ contract LendingBorrowing is ReentrancyGuard {
         priceFeed = AggregatorV3Interface(_priceFeed); //_priceFeed is ETH/USD priceFeed from chainlink
     }
 
+    /**
+     * @dev this function can be used by anyone, anytime.
+     * @notice there are two types who have ever called this function --> 
+     * 1. Pure depositors(their debt is 0) and,
+     * 2. Depositors and also borrowers(have borrowed also and have deposited also => which will then be counted as collateral in case of partial withdrwal).
+     */
     function deposit(uint256 weth_amount) public nonZero(weth_amount) {
         bool success = weth.transferFrom(msg.sender, address(this), weth_amount);
         if (!success) {
             revert LendingBorrowing__TransferFailed();
         }
         users[msg.sender].deposit += weth_amount;
+        users[msg.sender].collateral += weth_amount;
         users[msg.sender].lastDepositionTime = block.timestamp;
         emit deposited(msg.sender, weth_amount, block.timestamp);
     }
 
+    /**
+     * @dev this function can also be used by anyone as long as one has enough collateral.
+     * @notice there are two types of people who have ever called this -->
+*          1. Pure borrowers (thier deposit amount is 0).
+*          2. Depositors and also borrowers (they have both collateral and their deposit can also be used as collateral in case of liquidation and partial withdrwal).
+     */
     function borrow(uint256 usdc_amount, uint256 collateral) public nonZero(usdc_amount) {
         //borrower wants usdc_amount of USDC.
         deposit(collateral);
-        users[msg.sender].collateral += collateral;
         uint256 collateralAmount = users[msg.sender].collateral; // in weth
         uint256 maximumCanBorrow = (collateralAmount * getWEthPrice()) / 2;
 
@@ -105,6 +117,9 @@ contract LendingBorrowing is ReentrancyGuard {
         }
     }
 
+    /**
+     * @dev this function is for the borrowers whi want to pay either full or some amount of their debt, because paying debt is always beneficial.
+     */
     function repay(uint256 usdc_amount, address user) public nonZero(usdc_amount) {
         require(users[user].debt > 0, "you are not a borrower!");
         uint256 amountToPay = calculateDebtWithInterest(user);
@@ -124,6 +139,10 @@ contract LendingBorrowing is ReentrancyGuard {
         emit repayed(user, usdc_amount, block.timestamp);
     }
 
+    /**
+     * @dev whenever the debt to collateral ratio goes above collateral factor, i.e. if the lender will be in loss due to your borrowing, your 
+     *      collateral will be seized. Also if user has deposited some money earlier will not be withdrawn partially or whatever way.
+     */
     function liquidation(address user) public nonReentrant {
         //use collateral(USD) to cover debt(already in USD)
         uint256 healthFactor = users[user].healthFactor;
@@ -150,6 +169,9 @@ contract LendingBorrowing is ReentrancyGuard {
         emit liquidated(user);
     }
 
+    /**
+     * @dev if the user is clean and pure depositor, then only one can withdraw using this function.
+     */
     function withdraw(uint256 weth_amount, address user) public nonZero(weth_amount) nonReentrant {
         require(users[user].debt == 0, "you are a borrower, can't withdraw!");
         uint256 totalAmountWithInterest = calculateWithdrawalWithInterest(user);
@@ -163,7 +185,11 @@ contract LendingBorrowing is ReentrancyGuard {
         users[user].lastDepositionTime = block.timestamp;
         emit withdrawn(user, weth_amount, block.timestamp);
     }
-
+    
+    /**
+     * @dev if the user is either a borrower or partial borrower(depositor + borrower) i.e. user had some debt, then user can call this 
+     *      function to withdraw some amount. Condition is that healthFactor should be greater than equal to MIN_HEALTH_FACTOR.
+     */
     function partialWithdraw(uint256 weth_amount, address user) public nonReentrant {
         require(users[user].debt > 0, "you are not a borrower!");
         uint256 healthFactorAfterWithdrawal = _healthFactor(user, (users[user].collateral - weth_amount));
