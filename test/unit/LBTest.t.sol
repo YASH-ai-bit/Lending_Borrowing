@@ -27,7 +27,7 @@ contract LBTest is Test {
     function setUp() public {
         deployer = new DeployLB();
         (lb, config) = deployer.run();
-        (wethUsdPriceFeed,  _weth,  _usdc, ) = config.activeNetworkConfig();
+        (wethUsdPriceFeed, _weth, _usdc,) = config.activeNetworkConfig();
         weth = ERC20Mock(_weth);
         usdc = ERC20Mock(_usdc);
 
@@ -51,25 +51,25 @@ contract LBTest is Test {
     ///////////////////DEPOSIT////////////////////////
     function testMappingUpdatesAfterDepositingSomeAmount() public {
         vm.prank(USER);
-        lb.deposit(AMT_WETH);                             
+        lb.deposit(AMT_WETH);
         console.log(lb.getUser(USER).deposit);
         assert(lb.getUser(USER).deposit == 100);
     }
 
     /////////////////BORROW//////////////////////////
-    function testRevertIfBorrowAmountLargerThanCollateral() public {              // 100000000000000000000 eth --> 100 weth --> 1 eth = 2000 usdc --> maxborrow = 1,00,000 usdc --> 1,00,000e6
+    function testRevertIfBorrowAmountLargerThanCollateral() public {
+        // 100000000000000000000 eth --> 100 weth --> 1 eth = 2000 usdc --> maxborrow = 1,00,000 usdc --> 1,00,000e6
         vm.prank(USER);
 
         vm.expectRevert(LendingBorrowing.LendingBorrowing__NotEnoughCollateral.selector);
         lb.borrow(TEST_AMT, AMT_WETH);
         console.log(usdc.balanceOf(USER));
         console.log(usdc.balanceOf(address(this)));
-        console.log(lb.getUser(USER).collateral);           
+        console.log(lb.getUser(USER).collateral);
         console.log(lb.getWEthPrice());
         console.log(usdc.balanceOf(USER));
         console.log(lb.getUser(USER).debt);
         console.log(lb.getUser(USER).deposit);
-
     }
 
     //////////////////REPAY///////////////////
@@ -77,18 +77,18 @@ contract LBTest is Test {
         vm.prank(USER);
         lb.borrow(AMT_USDC, AMT_WETH);
         console.log(lb.getUser(USER).debt);
-        vm.warp(block.timestamp + (60*60*24*365));
+        vm.warp(block.timestamp + (60 * 60 * 24 * 365));
         vm.roll(block.number + 1);
         console.log(lb.getUser(USER).debt);
         console.log(lb.getUser(USER).isBorrower);
         console.log(lb.calculateDebtWithInterest(USER));
         vm.expectRevert(LendingBorrowing.LendingBorrowing__DoNotOverpay.selector);
-        lb.repay((AMT_USDC + (AMT_USDC *8)/100) , USER);                           // after one year --> interest = AMT_USDC * INTEREST_RATE 
+        lb.repay((AMT_USDC + (AMT_USDC * 8) / 100), USER); // after one year --> interest = AMT_USDC * INTEREST_RATE
         console.log(lb.getUser(USER).debt);
         console.log(usdc.balanceOf(USER));
     }
 
-////////////////// LIQUIDATION //////////////////
+    ////////////////// LIQUIDATION //////////////////
     function testLiquidationHappensWhenDebtExceedsCollateral() public {
         vm.prank(USER);
         lb.borrow(TEST_AMT, AMT_WETH);
@@ -129,7 +129,7 @@ contract LBTest is Test {
         lb.deposit(AMT_WETH);
 
         vm.prank(USER);
-        lb.withdraw(AMT_WETH / 2 , USER);
+        lb.withdraw(AMT_WETH / 2, USER);
 
         console.log(lb.getUser(USER).deposit);
         assert(lb.getUser(USER).deposit == AMT_WETH / 2);

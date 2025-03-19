@@ -8,10 +8,11 @@ import {HelperConfig} from "./HelperConfig.s.sol";
 contract DeployLB is Script {
     LendingBorrowing lb;
     HelperConfig config;
-    function run() external returns (LendingBorrowing , HelperConfig) {
+
+    function run() external returns (LendingBorrowing, HelperConfig) {
         config = new HelperConfig();
 
-        (address wethUsdPriceFeed, address weth, address usdc, ) = config.activeNetworkConfig();
+        (address wethUsdPriceFeed, address weth, address usdc,) = config.activeNetworkConfig();
 
         vm.startBroadcast();
         lb = new LendingBorrowing(weth, usdc, wethUsdPriceFeed);

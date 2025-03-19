@@ -8,5 +8,8 @@ remappings = [
     '@chainlink/contracts=lib/chainlink-brownie-contracts/contracts',
 ]
 
+[invariant]
+runs = 256
+depth = 256
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
