@@ -4,6 +4,7 @@ pragma solidity ^0.8.19;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import {console} from "forge-std/console.sol";
 
 contract LendingBorrowing is ReentrancyGuard{
     /////////////////ERRORS//////////////////
@@ -41,7 +42,6 @@ contract LendingBorrowing is ReentrancyGuard{
     IERC20 public weth;
     IERC20 public usdc;
     AggregatorV3Interface priceFeed;
-    uint256 public weth_price ;
     uint256 public constant USDC_PRICE = 1e18 ; // $1 --> assuming constant
 
     struct User {
@@ -71,8 +71,7 @@ contract LendingBorrowing is ReentrancyGuard{
         weth = IERC20(_weth);       //token1 can be deposited
         usdc = IERC20(_usdc);       //token2 can be borrowed
 
-        priceFeed = AggregatorV3Interface(_priceFeed);  
-        weth_price = getWEthPriceInUsd(1);               //_priceFeed is ETH/USD priceFeed from chainlink
+        priceFeed = AggregatorV3Interface(_priceFeed);                //_priceFeed is ETH/USD priceFeed from chainlink
     }
 
     function deposit(uint256 weth_amount) public nonZero(weth_amount){
@@ -88,13 +87,15 @@ contract LendingBorrowing is ReentrancyGuard{
 
     function borrow(uint256 usdc_amount) public nonZero(usdc_amount){                          //borrower wants usdc_amount of USDC.
         uint256 collateralAmount = users[msg.sender].collateral;
-        uint256 maximumCanBorrow =(collateralAmount * weth_price * COLLATERAL_FACTOR)/(100);
+        uint256 maximumCanBorrow =(collateralAmount * getWEthPrice() * COLLATERAL_FACTOR)/(100);
 
         if(usdc_amount > maximumCanBorrow){
             revert LendingBorrowing__NotEnoughCollateral();
         }else{
 
-        usdc.transferFrom(address(this), msg.sender, usdc_amount);
+        bool success = usdc.transfer(msg.sender, usdc_amount);
+        if (!success) revert LendingBorrowing__TransferFailed();
+
         users[msg.sender].debt += usdc_amount;                          //updating debt
         users[msg.sender].lastBorrowTime = block.timestamp;             //updating timestamp to use in repay calculation
         users[msg.sender].isBorrower = true;
@@ -219,15 +220,32 @@ contract LendingBorrowing is ReentrancyGuard{
         return ((uint256(price) * ADDITIONAL_FEED_PRECISION) * weth_amount) / PRECISION;
     } 
 
+    function getWEthPrice() public view returns(uint256) {
+        (, int256 price,,,) = priceFeed.latestRoundData();
+        if(price <= 0) {
+            revert LendingBorrowing__InvalidPriceFeed();
+        }
+        return (uint256(price) * ADDITIONAL_FEED_PRECISION) / PRECISION;
+    }
+
     //////////////GETTER FUNCTIONS////////////////
     function getUser(address user) external view returns(User memory){
         return users[user];
     }
 
-    function getmaxborrow() external view returns(uint256) {
+    function getmaxborrow() external view returns (uint256) {
         uint256 collateralAmount = users[msg.sender].collateral;
-        return ((collateralAmount * weth_price * COLLATERAL_FACTOR));
+        uint256 wethPrice = getWEthPrice();
+        uint256 maxBorrow = (collateralAmount * wethPrice * COLLATERAL_FACTOR) / 100;
+
+        console.log("Collateral Amount:", collateralAmount);
+        console.log("WETH Price:", wethPrice);
+        console.log("Max Borrow:", maxBorrow);
+
+        return maxBorrow;
     }
+
+
 }
   
 

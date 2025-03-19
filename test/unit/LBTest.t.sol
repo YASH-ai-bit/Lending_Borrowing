@@ -60,7 +60,7 @@ contract LBTest is Test {
 
         console.log(lb.getUser(USER).collateral);
         console.log(lb.getmaxborrow());
-        console.log(lb.weth_price());
+        console.log(lb.getWEthPrice());
         console.log(usdc.balanceOf(USER));
         console.log(lb.getUser(USER).debt);
         vm.expectRevert(LendingBorrowing.LendingBorrowing__NotEnoughCollateral.selector);
