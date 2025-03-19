@@ -18,10 +18,11 @@ contract LBTest is Test {
     ERC20Mock usdc;
 
     address public USER = makeAddr("User");
-    uint256 public constant INITIAL_BALANCE = 1000;
+    uint256 public constant INITIAL_BALANCE_WETH = 5000;
+    uint256 public constant INITIAL_BALANCE_USDC = 10000000;
     uint256 public constant AMT_WETH = 100;
     uint256 public constant AMT_USDC = 100;
-    uint256 public constant TEST_AMT = 10;
+    uint256 public constant TEST_AMT = 100001;
 
     function setUp() public {
         deployer = new DeployLB();
@@ -30,11 +31,13 @@ contract LBTest is Test {
         weth = ERC20Mock(_weth);
         usdc = ERC20Mock(_usdc);
 
-        weth.mint(USER, INITIAL_BALANCE);
-        usdc.mint(USER, INITIAL_BALANCE);
+        weth.mint(USER, INITIAL_BALANCE_WETH);
+        usdc.mint(USER, INITIAL_BALANCE_USDC);
 
-        weth.mint(address(this), INITIAL_BALANCE);
-        usdc.mint(address(this), INITIAL_BALANCE);
+        weth.mint(address(this), INITIAL_BALANCE_WETH);
+        usdc.mint(address(this), INITIAL_BALANCE_USDC);
+
+        usdc.mint(address(lb), INITIAL_BALANCE_USDC);
 
         weth.approve(address(lb), type(uint256).max);
         usdc.approve(address(lb), type(uint256).max);
@@ -54,18 +57,37 @@ contract LBTest is Test {
     }
 
     /////////////////BORROW//////////////////////////
-    function testRevertIfBorrowAmountLargerThanCollateral() public {
-        vm.prank(USER);              // 100000000000000000000 eth --> 100 weth --> 1 eth = 2000 usdc --> maxborrow = 1,00,000 usdc --> 1,00,000e6
-        lb.deposit(AMT_WETH);
+    function testRevertIfBorrowAmountLargerThanCollateral() public {              // 100000000000000000000 eth --> 100 weth --> 1 eth = 2000 usdc --> maxborrow = 1,00,000 usdc --> 1,00,000e6
+        vm.prank(USER);
 
-        console.log(lb.getUser(USER).collateral);
-        console.log(lb.getmaxborrow());
+        vm.expectRevert(LendingBorrowing.LendingBorrowing__NotEnoughCollateral.selector);
+        lb.borrow(TEST_AMT, AMT_WETH);
+        console.log(usdc.balanceOf(USER));
+        console.log(usdc.balanceOf(address(this)));
+        console.log(lb.getUser(USER).collateral);           
         console.log(lb.getWEthPrice());
         console.log(usdc.balanceOf(USER));
         console.log(lb.getUser(USER).debt);
-        vm.expectRevert(LendingBorrowing.LendingBorrowing__NotEnoughCollateral.selector);
-        lb.borrow(TEST_AMT);
+        console.log(lb.getUser(USER).deposit);
+
     }
 
+    //////////////////REPAY///////////////////
+    function testRevertIfRepayAmountIsMoreThanAmountToPay() public {
+        vm.prank(USER);
+        lb.borrow(AMT_USDC, AMT_WETH);
+        console.log(lb.getUser(USER).debt);
+        vm.warp(block.timestamp + (60*60*24*365));
+        vm.roll(block.number + 1);
+        console.log(lb.getUser(USER).debt);
+        console.log(lb.getUser(USER).isBorrower);
+        console.log(lb.calculateDebtWithInterest(USER));
+        vm.expectRevert(LendingBorrowing.LendingBorrowing__DoNotOverpay.selector);
+        lb.repay((AMT_USDC + (AMT_USDC *8)/100) , USER);                           // after one year --> interest = AMT_USDC * INTEREST_RATE 
+        console.log(lb.getUser(USER).debt);
+        console.log(usdc.balanceOf(USER));
+    }
+
+    //////////////////
 
 }
