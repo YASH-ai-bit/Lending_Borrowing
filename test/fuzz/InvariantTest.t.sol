@@ -62,7 +62,9 @@ contract InvariantTest is Test {
     function invariant_forceLiquidationIfUnhealthy() public {
         vm.prank(USER);
         lb.borrow(AMT_USDC, AMT_WETH);
-
+        if (lb.getUser(USER).healthFactor < lb.MIN_HEALTH_FACTOR()) {        //liquidate if unhealthy...
+            lb.liquidation(USER);
+        }
         assert(lb.getUser(USER).healthFactor >= lb.MIN_HEALTH_FACTOR() || lb.getUser(USER).debt == 0);
 
     }
