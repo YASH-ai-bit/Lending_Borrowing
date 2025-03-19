@@ -124,15 +124,13 @@ contract LendingBorrowing is ReentrancyGuard{
 
     function liquidation(address user) public nonReentrant{           //use collateral(USD) to cover debt(already in USD)
         uint256 healthFactor = users[user].healthFactor;
-        if(!users[user].isBorrower) {
-            revert LendingBorrowing__UserIsNotBorrower();
-        }
+        require(users[user].debt > 0 ,"you are not a borrower!");
         if(healthFactor > MIN_HEALTH_FACTOR) {
             revert LendingBorrowing__UserHealthOK();
         }
         uint256 collateralInWEth = users[user].collateral;
         uint256 collateralInUsdc = getWEthPriceInUsd(collateralInWEth);
-        uint256 debtAlreadyInUsdc = users[user].debt * USDC_PRICE;
+        uint256 debtAlreadyInUsdc = calculateDebtWithInterest(user);
         uint256 liquidationBonus = (collateralInUsdc * LIQUIDATION_BONUS) / LIQUIDATION_PRECISION ;
         uint256 totalDebtToBeCovered = debtAlreadyInUsdc + liquidationBonus;
 
@@ -230,6 +228,16 @@ contract LendingBorrowing is ReentrancyGuard{
     //////////////GETTER FUNCTIONS////////////////
     function getUser(address user) external view returns(User memory){
         return users[user];
+    }
+
+    function getAmountToBeCoveredInUsd(address user) external view returns(uint256){
+        uint256 collateralInWEth = users[user].collateral;
+        uint256 collateralInUsdc = getWEthPriceInUsd(collateralInWEth);
+        uint256 debtAlreadyInUsdc = calculateDebtWithInterest(user) ;
+        uint256 liquidationBonus = (collateralInUsdc * LIQUIDATION_BONUS) / LIQUIDATION_PRECISION ;
+        uint256 totalDebtToBeCovered = debtAlreadyInUsdc + liquidationBonus;
+        console.log("Liquidation bonus :", liquidationBonus);
+        return totalDebtToBeCovered;
     }
 }
   

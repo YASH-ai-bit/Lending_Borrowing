@@ -22,7 +22,7 @@ contract LBTest is Test {
     uint256 public constant INITIAL_BALANCE_USDC = 10000000;
     uint256 public constant AMT_WETH = 100;
     uint256 public constant AMT_USDC = 100;
-    uint256 public constant TEST_AMT = 100001;
+    uint256 public constant TEST_AMT = 9000;
 
     function setUp() public {
         deployer = new DeployLB();
@@ -88,6 +88,50 @@ contract LBTest is Test {
         console.log(usdc.balanceOf(USER));
     }
 
-    //////////////////
+////////////////// LIQUIDATION //////////////////
+    function testLiquidationHappensWhenDebtExceedsCollateral() public {
+        vm.prank(USER);
+        lb.borrow(TEST_AMT, AMT_WETH);
 
+        vm.warp(block.timestamp + (60 * 60 * 24 * 365));
+        vm.roll(block.number + 1);
+
+        console.log(lb.getUser(USER).debt);
+        console.log(lb.getUser(USER).deposit);
+        console.log(lb.getUser(USER).collateral);
+        console.log(lb.getWEthPriceInUsd(100));
+        console.log(lb.calculateDebtWithInterest(USER));
+        console.log(lb.getAmountToBeCoveredInUsd(USER));
+
+        vm.prank(USER);
+        lb.liquidation(USER);
+
+        console.log(lb.getUser(USER).debt);
+        console.log(lb.getUser(USER).deposit);
+        assert(lb.getUser(USER).debt == 0);
+    }
+
+    ////////////////// WITHDRAW //////////////////
+    function testFullWithdrawSucceedsIfNoDebt() public {
+        vm.prank(USER);
+        lb.deposit(AMT_WETH);
+
+        vm.prank(USER);
+        lb.withdraw(AMT_WETH, USER);
+
+        console.log(weth.balanceOf(USER));
+        assert(weth.balanceOf(USER) == INITIAL_BALANCE_WETH);
+    }
+
+    ////////////////// PARTIAL WITHDRAW //////////////////
+    function testPartialWithdrawReducesDepositCorrectly() public {
+        vm.prank(USER);
+        lb.deposit(AMT_WETH);
+
+        vm.prank(USER);
+        lb.withdraw(AMT_WETH / 2 , USER);
+
+        console.log(lb.getUser(USER).deposit);
+        assert(lb.getUser(USER).deposit == AMT_WETH / 2);
+    }
 }
